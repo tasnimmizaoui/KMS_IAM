@@ -1,0 +1,51 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          KMS CODEBASE (ANALYZED)                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  app/config.py          → Configuration management (.env → Python objects)  │
+│  app/database.py        → Database connection + SQLAlchemy setup            │
+│  app/models/            → Database schema (users, roles, keys, logs)        │
+│  app/iam/manager.py     → User registration, login, JWT, roles              │
+│  app/iam/policy.py      → RBAC rules (who can do what)                      │
+│  app/crypto/core.py     → AES-256-GCM + Envelope encryption                 │
+│  app/kms/key_manager.py → Key lifecycle (create, encrypt, decrypt, rotate)  │
+│  app/api/auth.py        → REST endpoints for /auth/*                        │
+│  app/api/keys.py        → REST endpoints for /keys/*                        │
+│  app/main.py            → FastAPI app + router registration                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DEK stands for Data Encryption Key.
+
+In the context of this KMS application, it's a cryptographic key used in envelope encryption. Here's how it works:
+
+Generation: A random 256-bit AES key is generated (see generate_data_key() method)
+Purpose: Used to encrypt the actual data/plaintext
+Protection: The DEK itself is then encrypted using the master key and stored alongside the encrypted data
+This two-layer approach is called envelope encryption and provides several security benefits:
+
+Separation of concerns: The master key stays in a protected location while DEKs are distributed with the encrypted data
+Key rotation: You can rotate the master key without re-encrypting all data—only the DEKs need to be re-encrypted
+Performance: DEKs allow parallel encryption/decryption operations
+In your code's encrypt_envelope() method:
+
+Generate a random DEK
+Encrypt the plaintext with the DEK using AES-256-GCM
+Encrypt the DEK with the master key
+Return both the encrypted data and encrypted DEK
+When decrypting, the process is reversed: decrypt the DEK with the master key, then use the DEK to decrypt the actual data.
+
+
+Data = the information you're protecting
+DEK = a random key that encrypts the data
+Master key = the key that encrypts the DEK
+
+Why do this?
+
+If someone steals the encrypted data, they also get the locked DEK, but can't open it without the master key
+The master key is kept super safe and separate
+You can change the master key without having to re-encrypt all your data—just re-encrypt the DEKs
+
+
+-> Bottom line: DEK is just a temporary lock-and-key you generate fresh each time to protect data, then lock that key away with a master key.
+
