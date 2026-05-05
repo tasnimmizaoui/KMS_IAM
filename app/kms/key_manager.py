@@ -112,12 +112,14 @@ class KeyManager:
             raise ValueError(f"Key {key_id} not found")
         
         # Create new key with same properties
+        new_encrypted_blob = self.crypto.encrypt_envelope(self.crypto.generate_aes_key())
+
         new_key = Key(
             name=f"{old_key.name}_v{old_key.version + 1}",
             type=old_key.type,
             size=old_key.size,
             algorithm=old_key.algorithm,
-            encrypted_blob=self.crypto.encrypt_envelope(self.crypto.generate_aes_key()),
+            encrypted_blob=json.dumps(new_encrypted_blob),
             created_by=user_id,
             expires_at=datetime.utcnow() + timedelta(days=old_key.rotation_days),
             rotation_days=old_key.rotation_days,
@@ -126,6 +128,7 @@ class KeyManager:
             version=old_key.version + 1,
             previous_version_id=key_id
         )
+
         
         db.add(new_key)
         
