@@ -148,7 +148,7 @@ db.close()
 "
 
 # Start the API server
-python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000```
+python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Open http://localhost:8000/docs in your browser.
 
@@ -235,6 +235,20 @@ curl -X POST "http://localhost:8000/keys/<key_id>/rotate" \
 ```
 
 ---
+## Smoke test (E2E API)
+
+Prereqs:
+- API running on http://localhost:8000
+- WSL/bash
+- jq installed
+
+Run:
+```bash
+cd /mnt/c/Users/farah/KMS_IAM
+source venv/bin/activate
+chmod +x scripts/smoke_api_bootstrap.sh
+BASE_URL="http://localhost:8000" ./scripts/smoke_api_bootstrap.sh
+```
 
 ## Security Model
 

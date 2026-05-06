@@ -10,6 +10,7 @@ from app.kms.key_manager import KeyManager
 from app.crypto.core import CryptoCore
 from app.api.auth import get_current_user
 from app.iam.policy import PolicyEngine
+from app.kms.errors import KeyNotFoundError, InvalidKeyStateError, InvalidAllowedOpsError
 
 router = APIRouter(prefix="/keys", tags=["key management"])
 
@@ -95,6 +96,8 @@ def create_key(
         )
         return CreateKeyResponse(**result)
     except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except InvalidAllowedOpsError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=_db_error_detail(e))
@@ -195,6 +198,10 @@ def rotate_key(
 
     try:
         return kms.rotate_key(db, key_id, current_user["id"])
+    except KeyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidKeyStateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:

@@ -6,12 +6,37 @@ from sqlalchemy.orm import Session
 from app.models.key import Key
 from app.crypto.core import CryptoCore
 from app.audit.logger import AuditLogger
+from app.kms.errors import KeyNotFoundError, InvalidKeyStateError, InvalidAllowedOpsError
 
 
 class KeyManager:
     # Key lifecycle & operations
     def __init__(self, crypto: CryptoCore):
         self.crypto = crypto
+
+    @staticmethod
+    def _validate_allowed_ops(allowed_ops: List[str]) -> List[str]:
+        """Validate and normalize allowed operations for key usage."""
+        if not isinstance(allowed_ops, list) or not allowed_ops:
+            raise InvalidAllowedOpsError("allowed_ops must be a non-empty list")
+
+        supported = {"encrypt", "decrypt"}
+        normalized = []
+        seen = set()
+
+        for op in allowed_ops:
+            if not isinstance(op, str):
+                raise InvalidAllowedOpsError("allowed_ops entries must be strings")
+            if op not in supported:
+                raise InvalidAllowedOpsError(
+                    "allowed_ops contains unsupported operation(s); only 'encrypt' and 'decrypt' are allowed"
+                )
+            if op in seen:
+                raise InvalidAllowedOpsError("allowed_ops contains duplicate operation(s)")
+            seen.add(op)
+            normalized.append(op)
+
+        return normalized
 
     def create_key(
             self,
@@ -23,6 +48,7 @@ class KeyManager:
     ) -> Dict:
         """Create a new cryptographic key"""
         try:
+            allowed_ops = self._validate_allowed_ops(allowed_ops)
             raw_key = self.crypto.generate_aes_key()
             encrypted_blob = self.crypto.encrypt_envelope(raw_key)
             expires_at = datetime.utcnow() + timedelta(days=rotation_days)
@@ -200,7 +226,20 @@ class KeyManager:
                 success=False,
                 details={"error": "key_not_found"},
             )
-            raise ValueError(f"Key {key_id} not found")
+            raise KeyNotFoundError(f"Key {key_id} not found")
+
+        if old_key.state != "enabled":
+            AuditLogger.log(
+                user_id=user_id,
+                action="KEY_ROTATE",
+                resource="key",
+                resource_id=key_id,
+                success=False,
+                details={"error": "invalid_key_state", "state": old_key.state},
+            )
+            raise InvalidKeyStateError(
+                f"Key {key_id} state '{old_key.state}' is not valid for rotation"
+            )
 
         try:
             new_encrypted_blob = self.crypto.encrypt_envelope(self.crypto.generate_aes_key())
