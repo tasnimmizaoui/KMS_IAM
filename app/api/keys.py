@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel
 from typing import List, Optional
 import base64
@@ -67,16 +68,24 @@ def _policy(db: Session) -> PolicyEngine:
     return PolicyEngine(db)
 
 
+def _db_error_detail(e: Exception) -> str:
+    # Helpful hint for the common SQLite schema mismatch issue
+    return (
+        "Database error. If you recently changed the SQLAlchemy models, "
+        "SQLite tables are NOT auto-migrated by create_all(). "
+        "Recreate/migrate the DB (e.g., delete data/kms-iam.db and rerun scripts/init_db.py). "
+        f"Error: {str(e)}"
+    )
+
+
 @router.post("/create", response_model=CreateKeyResponse)
 def create_key(
         request: CreateKeyRequest,
         current_user: dict = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """Create a new cryptographic key"""
     policy = _policy(db)
     roles = current_user.get("roles", [])
-
     if not policy.can_create_key(roles):
         raise HTTPException(status_code=403, detail="Not allowed to create keys")
 
@@ -87,6 +96,8 @@ def create_key(
         return CreateKeyResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
 
 
 @router.post("/encrypt", response_model=EncryptResponse)
@@ -95,10 +106,8 @@ def encrypt(
         current_user: dict = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """Encrypt data using a key"""
     policy = _policy(db)
     roles = current_user.get("roles", [])
-
     if not policy.can_encrypt(roles):
         raise HTTPException(status_code=403, detail="Not allowed to encrypt")
 
@@ -114,10 +123,11 @@ def encrypt(
             tag_b64=result["tag"],
         )
     except PermissionError as e:
-        # ex: key allowed_ops does not include encrypt
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
 
 
 @router.post("/decrypt", response_model=DecryptResponse)
@@ -126,10 +136,8 @@ def decrypt(
         current_user: dict = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """Decrypt data using a key"""
     policy = _policy(db)
     roles = current_user.get("roles", [])
-
     if not policy.can_decrypt(roles):
         raise HTTPException(status_code=403, detail="Not allowed to decrypt")
 
@@ -151,6 +159,8 @@ def decrypt(
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
 
 
 @router.get("/", response_model=ListKeysResponse)
@@ -158,10 +168,8 @@ def list_keys(
         current_user: dict = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """List all keys (metadata only)"""
     policy = _policy(db)
     roles = current_user.get("roles", [])
-
     if not policy.can_list_keys(roles):
         raise HTTPException(status_code=403, detail="Not allowed to list keys")
 
@@ -170,6 +178,8 @@ def list_keys(
         return ListKeysResponse(keys=keys)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
 
 
 @router.post("/{key_id}/rotate")
@@ -178,17 +188,16 @@ def rotate_key(
         current_user: dict = Depends(get_current_user),
         db: Session = Depends(get_db),
 ):
-    """Rotate a key (create new version)"""
     policy = _policy(db)
     roles = current_user.get("roles", [])
-
     if not policy.can_rotate_key(roles):
         raise HTTPException(status_code=403, detail="Not allowed to rotate keys")
 
     try:
-        result = kms.rotate_key(db, key_id, current_user["id"])
-        return result
+        return kms.rotate_key(db, key_id, current_user["id"])
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
