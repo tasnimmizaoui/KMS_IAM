@@ -148,8 +148,7 @@ db.close()
 "
 
 # Start the API server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000```
 
 Open http://localhost:8000/docs in your browser.
 
