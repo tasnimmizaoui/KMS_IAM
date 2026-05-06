@@ -8,6 +8,7 @@ from app.database import get_db
 from app.kms.key_manager import KeyManager
 from app.crypto.core import CryptoCore
 from app.api.auth import get_current_user
+from app.iam.policy import PolicyEngine
 
 router = APIRouter(prefix="/keys", tags=["key management"])
 
@@ -62,6 +63,10 @@ crypto = CryptoCore()
 kms = KeyManager(crypto)
 
 
+def _policy(db: Session) -> PolicyEngine:
+    return PolicyEngine(db)
+
+
 @router.post("/create", response_model=CreateKeyResponse)
 def create_key(
         request: CreateKeyRequest,
@@ -69,17 +74,17 @@ def create_key(
         db: Session = Depends(get_db),
 ):
     """Create a new cryptographic key"""
-    try:
-        user_roles = current_user.get("roles", [])
-        if "admin" not in user_roles and "key_manager" not in user_roles:
-            raise PermissionError("Only key managers can create keys")
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
 
+    if not policy.can_create_key(roles):
+        raise HTTPException(status_code=403, detail="Not allowed to create keys")
+
+    try:
         result = kms.create_key(
             db, request.name, current_user["id"], request.allowed_ops, request.rotation_days
         )
         return CreateKeyResponse(**result)
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -91,6 +96,12 @@ def encrypt(
         db: Session = Depends(get_db),
 ):
     """Encrypt data using a key"""
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
+
+    if not policy.can_encrypt(roles):
+        raise HTTPException(status_code=403, detail="Not allowed to encrypt")
+
     try:
         plaintext = base64.b64decode(request.plaintext_b64)
         aad = base64.b64decode(request.aad_b64) if request.aad_b64 else None
@@ -103,6 +114,7 @@ def encrypt(
             tag_b64=result["tag"],
         )
     except PermissionError as e:
+        # ex: key allowed_ops does not include encrypt
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -115,6 +127,12 @@ def decrypt(
         db: Session = Depends(get_db),
 ):
     """Decrypt data using a key"""
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
+
+    if not policy.can_decrypt(roles):
+        raise HTTPException(status_code=403, detail="Not allowed to decrypt")
+
     try:
         aad = base64.b64decode(request.aad_b64) if request.aad_b64 else None
 
@@ -141,6 +159,12 @@ def list_keys(
         db: Session = Depends(get_db),
 ):
     """List all keys (metadata only)"""
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
+
+    if not policy.can_list_keys(roles):
+        raise HTTPException(status_code=403, detail="Not allowed to list keys")
+
     try:
         keys = kms.list_keys(db, current_user["id"])
         return ListKeysResponse(keys=keys)
@@ -155,11 +179,13 @@ def rotate_key(
         db: Session = Depends(get_db),
 ):
     """Rotate a key (create new version)"""
-    try:
-        user_roles = current_user.get("roles", [])
-        if "admin" not in user_roles and "key_manager" not in user_roles:
-            raise PermissionError("Only key managers can rotate keys")
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
 
+    if not policy.can_rotate_key(roles):
+        raise HTTPException(status_code=403, detail="Not allowed to rotate keys")
+
+    try:
         result = kms.rotate_key(db, key_id, current_user["id"])
         return result
     except PermissionError as e:
