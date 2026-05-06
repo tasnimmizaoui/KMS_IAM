@@ -16,9 +16,25 @@ def get_audit_logs(
     
     # Only admin can view audit logs
     if "admin" not in current_user.get("roles", []):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="AUDIT_LOGS_READ",
+            resource="audit",
+            resource_id="logs",
+            success=False,
+            details={"reason": "insufficient_role", "roles": current_user.get("roles", [])},
+        )
         raise HTTPException(status_code=403, detail="Admin access required")
     
     logs = AuditLogger.get_logs(limit=limit, user_id=user_id, action=action)
+    AuditLogger.log(
+        user_id=current_user.get("id"),
+        action="AUDIT_LOGS_READ",
+        resource="audit",
+        resource_id="logs",
+        success=True,
+        details={"returned_count": len(logs), "filter_user_id": user_id, "filter_action": action},
+    )
     return {"logs": logs, "count": len(logs)}
 
 @router.get("/stats")
@@ -26,6 +42,14 @@ def get_audit_stats(current_user: dict = Depends(get_current_user)):
     """Get audit statistics (admin only)"""
     
     if "admin" not in current_user.get("roles", []):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="AUDIT_STATS_READ",
+            resource="audit",
+            resource_id="stats",
+            success=False,
+            details={"reason": "insufficient_role", "roles": current_user.get("roles", [])},
+        )
         raise HTTPException(status_code=403, detail="Admin access required")
     
     logs = AuditLogger.get_logs(limit=1000)
@@ -44,5 +68,14 @@ def get_audit_stats(current_user: dict = Depends(get_current_user)):
             stats["by_success"]["success"] += 1
         else:
             stats["by_success"]["failure"] += 1
+
+    AuditLogger.log(
+        user_id=current_user.get("id"),
+        action="AUDIT_STATS_READ",
+        resource="audit",
+        resource_id="stats",
+        success=True,
+        details={"total_events": stats["total_events"]},
+    )
     
     return stats

@@ -3,11 +3,16 @@ import os
 from datetime import datetime
 from typing import Optional
 import threading
+from app.config import settings
 
 class AuditLogger:
     """Thread-safe audit logger for compliance"""
     
     _lock = threading.Lock()
+
+    @staticmethod
+    def _log_file_path() -> str:
+        return settings.AUDIT_LOG_PATH
     
     @classmethod
     def log(cls, user_id: Optional[str], action: str, resource: str, 
@@ -25,13 +30,14 @@ class AuditLogger:
             "details": details or {},
             "source_ip": source_ip
         }
-        
-        # Ensure log directory exists
-        os.makedirs("data", exist_ok=True)
+
+        log_file = cls._log_file_path()
+        log_dir = os.path.dirname(log_file) or "."
+        os.makedirs(log_dir, exist_ok=True)
         
         # Thread-safe write to audit log file
         with cls._lock:
-            with open("data/audit.log", "a") as f:
+            with open(log_file, "a") as f:
                 f.write(json.dumps(entry) + "\n")
         
         # Also log to console for debugging
@@ -44,7 +50,7 @@ class AuditLogger:
     def get_logs(cls, limit: int = 100, user_id: str = None, action: str = None) -> list:
         """Retrieve audit logs for reporting"""
         logs = []
-        log_file = "data/audit.log"
+        log_file = cls._log_file_path()
         
         if not os.path.exists(log_file):
             return []

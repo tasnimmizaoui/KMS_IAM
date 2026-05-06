@@ -6,6 +6,7 @@ from typing import Optional
 from app.database import get_db
 from app.iam.manager import IAMManager
 from app.iam.policy import PolicyEngine
+from app.audit.logger import AuditLogger
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 security = HTTPBearer()
@@ -95,6 +96,19 @@ def assign_role(request: AssignRoleRequest, current_user: dict = Depends(get_cur
     """Assign a role to a user (admin only)"""
     # Check if current user is admin
     if "admin" not in current_user.get("roles", []):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="ROLE_ASSIGN",
+            resource="role",
+            resource_id=request.role_name,
+            success=False,
+            details={
+                "reason": "insufficient_role",
+                "target_user": request.username,
+                "required_role": "admin",
+                "roles": current_user.get("roles", []),
+            },
+        )
         raise HTTPException(status_code=403, detail="Admin role required")
     
     try:

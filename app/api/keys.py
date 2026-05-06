@@ -11,6 +11,7 @@ from app.crypto.core import CryptoCore
 from app.api.auth import get_current_user
 from app.iam.policy import PolicyEngine
 from app.kms.errors import KeyNotFoundError, InvalidKeyStateError, InvalidAllowedOpsError
+from app.audit.logger import AuditLogger
 
 router = APIRouter(prefix="/keys", tags=["key management"])
 
@@ -88,6 +89,14 @@ def create_key(
     policy = _policy(db)
     roles = current_user.get("roles", [])
     if not policy.can_create_key(roles):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_CREATE",
+            resource="key",
+            resource_id=request.name,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+        )
         raise HTTPException(status_code=403, detail="Not allowed to create keys")
 
     try:
@@ -112,6 +121,14 @@ def encrypt(
     policy = _policy(db)
     roles = current_user.get("roles", [])
     if not policy.can_encrypt(roles):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_ENCRYPT",
+            resource="key",
+            resource_id=request.key_id,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+        )
         raise HTTPException(status_code=403, detail="Not allowed to encrypt")
 
     try:
@@ -142,6 +159,14 @@ def decrypt(
     policy = _policy(db)
     roles = current_user.get("roles", [])
     if not policy.can_decrypt(roles):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_DECRYPT",
+            resource="key",
+            resource_id=request.key_id,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+        )
         raise HTTPException(status_code=403, detail="Not allowed to decrypt")
 
     try:
@@ -174,6 +199,14 @@ def list_keys(
     policy = _policy(db)
     roles = current_user.get("roles", [])
     if not policy.can_list_keys(roles):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_LIST",
+            resource="key",
+            resource_id="*",
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+        )
         raise HTTPException(status_code=403, detail="Not allowed to list keys")
 
     try:
@@ -194,6 +227,14 @@ def rotate_key(
     policy = _policy(db)
     roles = current_user.get("roles", [])
     if not policy.can_rotate_key(roles):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_ROTATE",
+            resource="key",
+            resource_id=key_id,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+        )
         raise HTTPException(status_code=403, detail="Not allowed to rotate keys")
 
     try:
