@@ -333,5 +333,3 @@ After bootstrapping (see Setup section), you can use:
 ## License
 
 This project is for educational purposes as part of a cryptography course.
-
----
