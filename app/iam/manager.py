@@ -112,3 +112,22 @@ class IAMManager:
         if not user:
             return []
         return [role.name for role in user.roles]
+
+    def change_password(self, db: Session, user_id: str, old_password: str, new_password: str) -> bool:
+        """Change password for a user (verify old password first)"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+        
+        # Vérifier l'ancien mot de passe
+        if not self.verify_password(old_password, user.password_hash):
+            return False
+        
+        # Mettre à jour avec le nouveau mot de passe
+        user.password_hash = self.hash_password(new_password)
+        db.commit()
+        
+        AuditLogger.log(user_id, "PASSWORD_CHANGED", "user", user_id, True,
+                      {"username": user.username})
+        
+        return True

@@ -302,3 +302,127 @@ class KeyManager:
                 details={"error": str(e)},
             )
             raise
+
+    # ========== NEW METHODS ==========
+
+    def get_key_info(self, db: Session, key_id: str) -> Dict:
+        """Récupérer les informations détaillées d'une clé (métadonnées)"""
+        key = db.query(Key).filter(Key.id == key_id).first()
+        if not key:
+            raise KeyNotFoundError(f"Key {key_id} not found")
+
+        return {
+            "id": key.id,
+            "name": key.name,
+            "type": key.type,
+            "algorithm": key.algorithm,
+            "created_at": key.created_at.isoformat() if key.created_at else None,
+            "expires_at": key.expires_at.isoformat() if key.expires_at else None,
+            "state": key.state,
+            "version": key.version,
+            "created_by": key.created_by,
+            "allowed_ops": json.loads(key.allowed_ops or "[]"),
+        }
+
+    def disable_key(self, db: Session, key_id: str, user_id: str) -> Dict:
+        """Désactiver une clé (elle ne peut plus être utilisée)"""
+        key = db.query(Key).filter(Key.id == key_id).first()
+        if not key:
+            raise KeyNotFoundError(f"Key {key_id} not found")
+
+        if key.state == "disabled":
+            raise InvalidKeyStateError(f"Key {key_id} is already disabled")
+
+        try:
+            key.state = "disabled"
+            db.commit()
+            db.refresh(key)
+
+            AuditLogger.log(
+                user_id=user_id,
+                action="KEY_DISABLE",
+                resource="key",
+                resource_id=key_id,
+                success=True,
+                details={"previous_state": key.state},
+            )
+
+            return {
+                "id": key.id,
+                "name": key.name,
+                "state": key.state,
+                "message": f"Key {key_id} disabled successfully",
+            }
+        except Exception as e:
+            db.rollback()
+            raise
+
+    def enable_key(self, db: Session, key_id: str, user_id: str) -> Dict:
+        """Réactiver une clé désactivée"""
+        key = db.query(Key).filter(Key.id == key_id).first()
+        if not key:
+            raise KeyNotFoundError(f"Key {key_id} not found")
+
+        if key.state == "enabled":
+            raise InvalidKeyStateError(f"Key {key_id} is already enabled")
+
+        try:
+            key.state = "enabled"
+            db.commit()
+            db.refresh(key)
+
+            AuditLogger.log(
+                user_id=user_id,
+                action="KEY_ENABLE",
+                resource="key",
+                resource_id=key_id,
+                success=True,
+                details={"previous_state": key.state},
+            )
+
+            return {
+                "id": key.id,
+                "name": key.name,
+                "state": key.state,
+                "message": f"Key {key_id} enabled successfully",
+            }
+        except Exception as e:
+            db.rollback()
+            raise
+
+    def get_key_versions(self, db: Session, key_id: str) -> List[Dict]:
+        """Lister toutes les versions d'une clé (historique de rotations)"""
+        # Chercher la clé de base
+        key = db.query(Key).filter(Key.id == key_id).first()
+        if not key:
+            raise KeyNotFoundError(f"Key {key_id} not found")
+
+        # Chercher toutes les versions (la clé en cours + toutes les versions précédentes)
+        versions = []
+        current = key
+
+        # Ajouter la clé actuelle
+        versions.append({
+            "version": current.version,
+            "created_at": current.created_at.isoformat() if current.created_at else None,
+            "state": current.state,
+            "key_id": current.id,
+        })
+
+        # Remonter à travers previous_version_id pour trouver toutes les versions anciennes
+        while current.previous_version_id:
+            prev_key = db.query(Key).filter(Key.id == current.previous_version_id).first()
+            if not prev_key:
+                break
+            versions.append({
+                "version": prev_key.version,
+                "created_at": prev_key.created_at.isoformat() if prev_key.created_at else None,
+                "state": prev_key.state,
+                "key_id": prev_key.id,
+            })
+            current = prev_key
+
+        # Trier par version (descendant)
+        versions.sort(key=lambda v: v["version"], reverse=True)
+        return versions
+

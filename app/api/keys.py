@@ -272,3 +272,126 @@ def rotate_key(
         raise HTTPException(status_code=400, detail=str(e))
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=_db_error_detail(e))
+
+
+# ========== NEW ENDPOINTS ==========
+
+@router.get("/{key_id}")
+def get_key(
+        key_id: str,
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Récupérer les informations détaillées d'une clé"""
+    try:
+        key = kms.get_key_info(db, key_id)
+        if not key:
+            raise HTTPException(status_code=404, detail=f"Key {key_id} not found")
+        return key
+    except KeyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
+
+
+@router.post("/{key_id}/disable")
+def disable_key(
+        key_id: str,
+        req: Request,
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Désactiver une clé (elle ne peut plus être utilisée)"""
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
+    if not policy.can_rotate_key(roles):  # même permission que rotate
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_DISABLE",
+            resource="key",
+            resource_id=key_id,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+            source_ip=req.client.host,
+        )
+        raise HTTPException(status_code=403, detail="Not allowed to disable keys")
+
+    try:
+        result = kms.disable_key(db, key_id, current_user["id"])
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_DISABLE",
+            resource="key",
+            resource_id=key_id,
+            success=True,
+            details={},
+            source_ip=req.client.host,
+        )
+        return result
+    except KeyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidKeyStateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
+
+
+@router.post("/{key_id}/enable")
+def enable_key(
+        key_id: str,
+        req: Request,
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Réactiver une clé désactivée"""
+    policy = _policy(db)
+    roles = current_user.get("roles", [])
+    if "admin" not in roles:
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_ENABLE",
+            resource="key",
+            resource_id=key_id,
+            success=False,
+            details={"reason": "insufficient_role", "roles": roles},
+            source_ip=req.client.host,
+        )
+        raise HTTPException(status_code=403, detail="Only admin can enable keys")
+
+    try:
+        result = kms.enable_key(db, key_id, current_user["id"])
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="KEY_ENABLE",
+            resource="key",
+            resource_id=key_id,
+            success=True,
+            details={},
+            source_ip=req.client.host,
+        )
+        return result
+    except KeyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InvalidKeyStateError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
+
+
+@router.get("/{key_id}/versions")
+def get_key_versions(
+        key_id: str,
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Lister toutes les versions d'une clé (historique de rotations)"""
+    try:
+        versions = kms.get_key_versions(db, key_id)
+        if not versions:
+            raise HTTPException(status_code=404, detail=f"Key {key_id} not found")
+        return {"key_id": key_id, "versions": versions}
+    except KeyNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=_db_error_detail(e))
+

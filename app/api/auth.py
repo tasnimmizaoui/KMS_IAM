@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from app.database import get_db
 from app.iam.manager import IAMManager
 from app.iam.policy import PolicyEngine
@@ -36,6 +36,24 @@ class AssignRoleRequest(BaseModel):
 
 class AssignRoleResponse(BaseModel):
     message: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class ChangePasswordResponse(BaseModel):
+    message: str
+
+class UserInfoResponse(BaseModel):
+    id: str
+    username: str
+    email: Optional[str]
+    roles: List[str]
+    is_active: bool
+
+class RoleInfo(BaseModel):
+    name: str
+    description: str
 
 iam_manager = IAMManager()
 
@@ -133,3 +151,108 @@ def assign_role(request: AssignRoleRequest, req: Request,
         return AssignRoleResponse(message=f"Role '{request.role_name}' assigned to '{request.username}'")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ========== NEW ENDPOINTS ==========
+
+@router.get("/users", response_model=dict)
+def list_users(
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Lister tous les utilisateurs (admin only)"""
+    if "admin" not in current_user.get("roles", []):
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="LIST_USERS",
+            resource="user",
+            resource_id="*",
+            success=False,
+            details={"reason": "insufficient_role", "roles": current_user.get("roles", [])},
+        )
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    from app.models.user import User
+    from app.models.role import Role
+
+    users_db = db.query(User).all()
+    users_list = []
+    
+    for user in users_db:
+        roles = db.query(Role.name).filter(Role.user_id == user.id).all()
+        users_list.append({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "roles": [r[0] for r in roles],
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+        })
+
+    AuditLogger.log(
+        user_id=current_user.get("id"),
+        action="LIST_USERS",
+        resource="user",
+        resource_id="*",
+        success=True,
+        details={"user_count": len(users_list)},
+    )
+
+    return {"users": users_list, "total": len(users_list)}
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+def change_password(
+        request: ChangePasswordRequest,
+        req: Request,
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Changer le mot de passe de l'utilisateur connecté"""
+    try:
+        success = iam_manager.change_password(
+            db, current_user["id"], request.old_password, request.new_password
+        )
+        if not success:
+            AuditLogger.log(
+                user_id=current_user.get("id"),
+                action="PASSWORD_CHANGE",
+                resource="user",
+                resource_id=current_user.get("id"),
+                success=False,
+                details={"reason": "invalid_old_password"},
+                source_ip=req.client.host,
+            )
+            raise HTTPException(status_code=401, detail="Invalid old password")
+
+        AuditLogger.log(
+            user_id=current_user.get("id"),
+            action="PASSWORD_CHANGE",
+            resource="user",
+            resource_id=current_user.get("id"),
+            success=True,
+            details={},
+            source_ip=req.client.host,
+        )
+        return ChangePasswordResponse(message="Password changed successfully")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/roles", response_model=dict)
+def list_roles(
+        current_user: dict = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    """Lister tous les rôles disponibles"""
+    from app.models.role import Role
+
+    roles_db = db.query(Role.name).distinct().all()
+    
+    roles_list = [
+        {"name": "admin", "description": "Accès administrateur complet au système"},
+        {"name": "key_manager", "description": "Créer, rotationner et gérer les clés"},
+        {"name": "key_user", "description": "Chiffrer et déchiffrer avec les clés existantes"},
+    ]
+
+    return {"roles": roles_list}
