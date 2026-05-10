@@ -333,3 +333,36 @@ After bootstrapping (see Setup section), you can use:
 ## License
 
 This project is for educational purposes as part of a cryptography course.
+
+---
+
+## Recent Improvements
+
+### ✅ Audit Logging on Success Paths
+All sensitive operations now log **both failures and successes** to the audit trail:
+- `LOGIN` / `LOGIN_FAIL`
+- `KEY_CREATE`, `KEY_ENCRYPT`, `KEY_DECRYPT`, `KEY_ROTATE`
+- `ROLE_ASSIGN`
+
+Each entry includes timestamp, user ID, action, resource, success status, and source IP.
+
+View logs (admin only):
+```bash
+GET /audit/logs
+GET /audit/stats
+```
+
+### ✅ Key Auto-Rotation Scheduler
+A background scheduler starts automatically with the server and rotates any key that has exceeded its `rotation_days` threshold — no manual intervention needed.
+
+- Runs every hour
+- Logs every rotation to the audit trail as `system-scheduler`
+- Confirmation on startup: `[scheduler] Auto-rotation scheduler started — runs every hour`
+
+To test manually:
+```bash
+PYTHONPATH=. python3 -c "
+from app.scheduler import auto_rotate_expired_keys
+auto_rotate_expired_keys()
+"
+```
