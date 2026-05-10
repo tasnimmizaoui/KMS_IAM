@@ -1,16 +1,24 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth_router, keys_router
 from app.api.audit import router as audit_router
+from app.scheduler import start_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
 
 
 app = FastAPI(
     title="KMS with Mini-IAM",
     description="Cryptographic Key Management System with Identity & Access Management",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
-# CORS middleware for web clients
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,7 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(auth_router)
 app.include_router(keys_router)
 app.include_router(audit_router)
